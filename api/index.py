@@ -24,6 +24,10 @@ convidados_db: dict[str, Convidado] = {}
 
 # === Funções de persistência ===
 
+@app.get("/")
+def root():
+    return {"message": "API do casamento funcionando!"}
+
 def save_db():
     with DB_PATH.open("w", encoding="utf-8") as f:
         json.dump(
