@@ -1,0 +1,19 @@
+{
+  "LES": {
+    "code": "LES",
+    "host": {
+      "name": "Luisa P. Guimarães",
+      "confirmed": true
+    },
+    "conjuge": {
+      "name": "Eduardo",
+      "confirmed": true
+    },
+    "dependentes": [
+      {
+        "name": "Suzana",
+        "confirmed": true
+      }
+    ]
+  }
+}
