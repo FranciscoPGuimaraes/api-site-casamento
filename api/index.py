@@ -1,10 +1,20 @@
-import json
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware  # <- Adicionado
 from pydantic import BaseModel
 from typing import List, Optional
 from pathlib import Path
+import json
 
 app = FastAPI()
+
+# Adicionado: Middleware de CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # ou ["http://localhost:5173"] para mais segurança
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Caminho do arquivo de persistência
 DB_PATH = Path("convidados.json")
@@ -21,8 +31,6 @@ class Convidado(BaseModel):
 
 # Banco de dados em memória
 convidados_db: dict[str, Convidado] = {}
-
-# === Funções de persistência ===
 
 @app.get("/")
 def root():
@@ -44,10 +52,7 @@ def load_db():
             data = json.load(f)
             convidados_db = {code: Convidado(**convidado) for code, convidado in data.items()}
 
-# Carrega os dados ao iniciar
 load_db()
-
-# === Rotas ===
 
 @app.post("/convidados")
 def adicionar_convidado(convidado: Convidado):
