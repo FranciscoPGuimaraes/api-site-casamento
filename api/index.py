@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware  # <- Adicionado
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from pathlib import Path
@@ -10,7 +11,7 @@ app = FastAPI()
 # Adicionado: Middleware de CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # ou ["http://localhost:5173"] para mais segurança
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,11 +57,14 @@ load_db()
 
 @app.post("/convidados")
 def adicionar_convidado(convidado: Convidado):
-    if convidado.code in convidados_db:
-        raise HTTPException(status_code=400, detail="Código já existente")
-    convidados_db[convidado.code] = convidado
-    save_db()
-    return {"message": "Convidado adicionado com sucesso"}
+    try:
+        if convidado.code in convidados_db:
+            raise HTTPException(status_code=400, detail="Código já existente")
+        convidados_db[convidado.code] = convidado
+        save_db()
+        return {"message": "Confirmado com sucesso"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/convidados")
 def listar_convidados():
