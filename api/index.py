@@ -3,12 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
-from pathlib import Path
+import psycopg2
 import json
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
 
-# Adicionado: Middleware de CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,9 +19,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Caminho do arquivo de persistência
-DB_PATH = Path("convidados.json")
 
 class Pessoa(BaseModel):
     name: str
@@ -30,57 +30,121 @@ class Convidado(BaseModel):
     conjuge: Optional[Pessoa] = None
     dependentes: Optional[List[Pessoa]] = []
 
-# Banco de dados em memória
-convidados_db: dict[str, Convidado] = {}
+def get_connection():
+    return psycopg2.connect(
+        user=os.getenv("user"),
+        password=os.getenv("password"),
+        host=os.getenv("host"),
+        port=os.getenv("port"),
+        dbname=os.getenv("dbname")
+    )
 
 @app.get("/")
 def root():
-    return {"message": "API do casamento funcionando!"}
-
-def save_db():
-    with DB_PATH.open("w", encoding="utf-8") as f:
-        json.dump(
-            {code: convidado.dict() for code, convidado in convidados_db.items()},
-            f,
-            ensure_ascii=False,
-            indent=2
-        )
-
-def load_db():
-    global convidados_db
-    if DB_PATH.exists():
-        with DB_PATH.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-            convidados_db = {code: Convidado(**convidado) for code, convidado in data.items()}
-
-load_db()
+    return {"message": "API do casamento funcionando com Supabase!"}
 
 @app.post("/convidados")
 def adicionar_convidado(convidado: Convidado):
     try:
-        if convidado.code in convidados_db:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("SELECT 1 FROM convidados WHERE code = %s", (convidado.code,))
+        if cur.fetchone():
             raise HTTPException(status_code=400, detail="Código já existente")
-        convidados_db[convidado.code] = convidado
-        save_db()
-        return {"message": "Confirmado com sucesso"}
+
+        cur.execute("""
+            INSERT INTO convidados (code, host_name, host_confirmed, conjuge_name, conjuge_confirmed, dependentes)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (
+            convidado.code,
+            convidado.host.name,
+            convidado.host.confirmed,
+            convidado.conjuge.name if convidado.conjuge else None,
+            convidado.conjuge.confirmed if convidado.conjuge else None,
+            json.dumps([dep.dict() for dep in convidado.dependentes])
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"message": "Convidado adicionado com sucesso"}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/convidados")
 def listar_convidados():
-    return list(convidados_db.values())
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM convidados")
+        rows = cur.fetchall()
+        convidados = []
+
+        for row in rows:
+            convidados.append(Convidado(
+                code=row[0],
+                host=Pessoa(name=row[1], confirmed=row[2]),
+                conjuge=Pessoa(name=row[3], confirmed=row[4]) if row[3] else None,
+                dependentes=[Pessoa(**d) for d in row[5]] if row[5] else []
+            ))
+
+        cur.close()
+        conn.close()
+        return convidados
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/convidados/{code}")
 def buscar_convidado(code: str):
-    convidado = convidados_db.get(code)
-    if not convidado:
-        raise HTTPException(status_code=404, detail="Convidado não encontrado")
-    return convidado
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM convidados WHERE code = %s", (code,))
+        row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Convidado não encontrado")
+
+        convidado = Convidado(
+            code=row[0],
+            host=Pessoa(name=row[1], confirmed=row[2]),
+            conjuge=Pessoa(name=row[3], confirmed=row[4]) if row[3] else None,
+            dependentes=[Pessoa(**d) for d in row[5]] if row[5] else []
+        )
+
+        cur.close()
+        conn.close()
+        return convidado
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.put("/convidados/{code}")
 def confirmar_presenca(code: str, convidado: Convidado):
     if code != convidado.code:
         raise HTTPException(status_code=400, detail="Código inconsistente")
-    convidados_db[code] = convidado
-    save_db()
-    return {"message": f"Confirmação atualizada para '{code}'"}
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            UPDATE convidados
+            SET host_name = %s, host_confirmed = %s,
+                conjuge_name = %s, conjuge_confirmed = %s,
+                dependentes = %s
+            WHERE code = %s
+        """, (
+            convidado.host.name,
+            convidado.host.confirmed,
+            convidado.conjuge.name if convidado.conjuge else None,
+            convidado.conjuge.confirmed if convidado.conjuge else None,
+            json.dumps([dep.dict() for dep in convidado.dependentes]),
+            code
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"message": f"Confirmação atualizada para '{code}'"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
